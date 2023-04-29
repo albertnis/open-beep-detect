@@ -22,7 +22,8 @@ jupyter = "^1.0.0"
 
 [tool.poetry.group.web.dependencies]
 flask = "^2.3.1"
-waitress = "^2.1.2"
+twisted = "^22.10.0"
+autobahn = "^23.1.2"
 
 [build-system]
 requires = ["poetry-core"]
