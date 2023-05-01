@@ -1,5 +1,7 @@
 import sys
 
+from threading import Event
+
 from twisted.python import log
 from twisted.internet import reactor
 from twisted.web.server import Site
@@ -11,7 +13,6 @@ from autobahn.twisted.resource import WebSocketResource, WSGIRootResource
 from .app import app
 from .ws import AudioServerProtocol
 
-from multiprocessing import Process
 import threading
 
 log.startLogging(sys.stdout)
@@ -26,15 +27,17 @@ rootResource = WSGIRootResource(wsgiResource, { b'ws': wsResource })
 
 site = Site(rootResource)
 
-def count_connections():
-    print("There are ", len(AudioServerProtocol.connected_instances), " connected instances")
+stopping = Event()
 
-def schedule_send(num):
-    print('Num is ', num)
-    threading.Timer(1, schedule_send, (num + 1,)).start()
-    reactor.callFromThread(AudioServerProtocol.sendMessageOnAllInstances, str(num))
+def schedule_send(num, stop_event):
+    if not stop_event.is_set():
+        print('Num is ', num)
+        print('Stopping is ', stopping)
+        threading.Timer(1, schedule_send, (num + 1, stop_event)).start()
+        reactor.callFromThread(AudioServerProtocol.sendMessageOnAllInstances, str(num))
 
-reactor.callInThread(schedule_send, 1)
+reactor.callInThread(schedule_send, 1, stopping)
 
 reactor.listenTCP(8080, site)
+reactor.addSystemEventTrigger('before', 'shutdown', lambda: stopping.set())
 reactor.run()
