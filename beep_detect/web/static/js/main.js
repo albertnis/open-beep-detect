@@ -10,3 +10,13 @@ ws.addEventListener("message", (ev) => console.log("message is ", ev.data));
 // setInterval(() => {
 //   ws.send(++val);
 // }, 1000);
+
+const playButton = document.getElementById("playpause");
+
+playButton.addEventListener("click", () => {
+  if (playButton.innerText === "Play") {
+    playButton.innerText = "Pause";
+  } else {
+    playButton.innerText = "Play";
+  }
+});
