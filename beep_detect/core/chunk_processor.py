@@ -1,3 +1,4 @@
+import array
 import numpy as np
 from scipy.fft import rfftfreq, rfft
 from scipy.signal import find_peaks
@@ -6,6 +7,7 @@ from timeit import default_timer as timer
 from threading import Lock
 from math import log2
 from beep_detect.core.fingerprint_to_chunkmap import fingerprint_to_chunkmap
+from beep_detect.core.time_conversion import ms_to_chunks
 from beep_detect.core.types import ChunkMap, FingerprintInMs
 
 class ChunkProcessor:
@@ -18,10 +20,10 @@ class ChunkProcessor:
           fingerprints: dict[str, FingerprintInMs],
           sample_rate: int,
           chunk_length: int,
-          peak_prominence: float = 10,
-          peak_distance: float = 10,
+          peak_prominence: float = 8,
+          peak_distance: float = 8,
           tolerance_f: float = 0.03,
-          tolerance_t: int = 2
+          tolerance_t_ms: float = 50
         ) -> None:
         '''
         Initialise a `ChunkProcessor`
@@ -30,10 +32,10 @@ class ChunkProcessor:
 
         - fingerprints (dict): Mapping of fingerprint name to the fingerprint definition with time expressed as number of chunks.
         - frequency_bands (list[int]): Sample frequencies for mapping from rFFT output to frequencies. Usually the output of `scipy.rfftfreq(chunk_length, d=1/sample_rate)`.
-        - peak_prominence (int, default 10): Prominence to use for decting frequency peaks. Used as the `prominence` argument when calling numpy's `find_peaks` method. Increasing this will decrease sensitivity.
-        - peak_distance (int, default 10): Distance to use for decting frequency peaks. Used as the `distance` argument when calling numpy's `find_peaks` method. Increasing this will decrease sensitivity.
+        - peak_prominence (int, default 12): Prominence to use for decting frequency peaks. Used as the `prominence` argument when calling numpy's `find_peaks` method. Increasing this will decrease sensitivity.
+        - peak_distance (int, default 12): Distance to use for decting frequency peaks. Used as the `distance` argument when calling numpy's `find_peaks` method. Increasing this will decrease sensitivity.
         - tolerance_f (int, default 0.03): Frequencies detected within this relative tolerance will match frequencies specified in the chunkmap. Increasing this will decrease sensitivity.
-        - tolerance_t (int, default 2): Maximum number of consecutive non-matching chunks that will be ignored while matching a fingerprint. Increasing this will decrease sensitivity.
+        - tolerance_t_ms (int, default 60): Maximum number of consecutive non-matching ms that will be ignored while matching a fingerprint. Increasing this will decrease sensitivity.
         '''
 
         # Set
@@ -43,12 +45,12 @@ class ChunkProcessor:
         self.peak_prominence = peak_prominence
         self.peak_distance = peak_distance
         self.tolerance_f = tolerance_f
-        self.tolerance_t = tolerance_t
 
         # Validate
         self._warn_if_chunk_length_not_power_of_2()
 
         # Derive
+        self.tolerance_t = ms_to_chunks(tolerance_t_ms, self.sample_rate, self.chunk_length)
         self.frequency_bands = rfftfreq(self.chunk_length, d=1/self.sample_rate)
         self.chunkmaps = { k: fingerprint_to_chunkmap(f, self.sample_rate, self.chunk_length) for k, f in fingerprints.items() }
         log.info(f'Chunk processor initialised with chunkmaps {self.chunkmaps}')
@@ -85,7 +87,7 @@ class ChunkProcessor:
 
         return self._analyse_chunk_for_match(chunk)
     
-    def _analyse_chunk_for_match(self, chunk: list[float]) -> set[str]:
+    def _analyse_chunk_for_match(self, chunk: list[int]) -> set[str]:
         start_time = timer()
 
         # Ensure chunk length is as expected
@@ -115,6 +117,7 @@ class ChunkProcessor:
         return matched_fingerprint_keys
 
     def _analyse_peaks_for_match(self, freq_peaks: list) -> set[str]:
+        
         # Assess each chunkmap to see if match status has changed
         fingerprint_matches = set()
         for k, state in self.match_state.items():
@@ -135,6 +138,7 @@ class ChunkProcessor:
             state['accumulated_errors']  += 1
           if matched:
             # Reset errors
+            log.debug(f'{k}: Peaks {freq_peaks} exact match for chunk {chunkmap["frequencies_to_match_by_chunk"][state["chunk"]]}')
             state['accumulated_errors'] = 0
 
           # Now assess the outcome:
@@ -177,19 +181,6 @@ class ChunkProcessor:
         log.debug(f'State after this chunk is {self.match_state}')
 
         return fingerprint_matches
-
-    def _matches_chunkmap_freqs_at_index_with_tolerance(self, chunkmap_freqs: list[list[float]], freq_tolerance, chunk_tolerance, index, frequencies):
-      if len(chunkmap_freqs[index]) == 0:
-        return True
-      
-      start_i_chunk = max(0, index-chunk_tolerance)
-      end_i_chunk = min(index+chunk_tolerance+1, len(chunkmap_freqs))
-
-      for i in range(start_i_chunk, end_i_chunk):
-        if self._matches_chunkmap_freqs_at_index(chunkmap_freqs, freq_tolerance, i, frequencies):
-          return True
-        
-      return False
 
     def _matches_chunkmap_freqs_at_index(self, chunkmap_freqs: list[list[float]], freq_tolerance, index, frequencies):
       expected_freqs = chunkmap_freqs[index]
